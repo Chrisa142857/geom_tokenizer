@@ -72,7 +72,7 @@ def trainval(loader, model, optimizer, loss_fn, e, epoch, device, train=True, us
         labels.append(label.detach().cpu())
         losses.append(loss.detach().cpu())
     preds = torch.cat(preds)
-    preds = torch.cat(labels)
+    labels = torch.cat(labels)
     losses = torch.stack(losses)
     acc = preds.eq(labels).sum().item() / len(labels)
     return losses.mean().item(), acc
