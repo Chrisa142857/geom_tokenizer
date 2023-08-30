@@ -9,15 +9,13 @@ from itertools import combinations
 
 
 def geom_tokenizer(node_feat: torch.Tensor, edge_index: torch.Tensor, N: int, dim: int=3):
-    # node_feat = data.x # X x C
     nids = torch.arange(len(node_feat))
-    # edge_index = data.edge_index # 2 x E
     geom_tokens = [] 
     token_count = []
     dis_sorts = []
     view_embeds = []
     node_embeds = []
-    for ni in tqdm(nids, desc='Prepare tokens...'):
+    for ni in nids:
         distances1 = ((node_feat[ni] - node_feat[ni+1:]) **2 ).sum(1)
         if len(distances1) > 0:
             mind = distances1.min()
@@ -36,7 +34,7 @@ def geom_tokenizer(node_feat: torch.Tensor, edge_index: torch.Tensor, N: int, di
         connected_node = edge_index[1, edge_index[0] == ni]
         nei_conn = (connected_node==nei_nid[..., None])
         connected_node = connected_node[~(nei_conn.any(0))]
-        connected_node = connected_node[distances[connected_node].argsort()] # also sort connected nodes
+        connected_node = connected_node[distances[connected_node].argsort()[:N]] # also sort connected nodes
         nei_nid = torch.cat([nei_nid, connected_node]) # concat in the sorted rank
         ## geom level 3, triangle, it has dim-1 = 2 view tokens
         ## view token, max = N, the neighbor num
@@ -59,7 +57,7 @@ def geom_tokenizer(node_feat: torch.Tensor, edge_index: torch.Tensor, N: int, di
         ## if view points are connected
         for di in range(len(nei_pair)):
             where_edge = []
-            views = torch.stack([view_node[nei_pair[di, 0]], view_node[nei_pair[di, 1]]], -1)
+            views = torch.stack([view_node[nei_pair[di, 0]], view_node[nei_pair[di, 1]]], -1) # pair of views
             for view in views: # for 2 in M x 2
                 where_edge.append((view == edge_index.T).any())
             where_edge = torch.where(torch.stack(where_edge))[0]
@@ -82,13 +80,63 @@ def geom_tokenizer(node_feat: torch.Tensor, edge_index: torch.Tensor, N: int, di
     # return pos_tokens, geom_tokens, view_tokens, node_embeds, token_count, dis_sorts
     return geom_tokens, view_dirs, node_embeds, token_count, dis_sorts
 
+def geom_tokenizer_onenode(ni: int, node_feat: torch.Tensor, edge_index: torch.Tensor, N: int, dim: int=3):
+    distances1 = ((node_feat[ni] - node_feat[ni+1:]) **2 ).sum(1)
+    if len(distances1) > 0:
+        mind = distances1.min()
+        maxd = distances1.max()
+    distances2 = ((node_feat[ni] - node_feat[:ni]) **2 ).sum(1)
+    if len(distances2) > 0:
+        mind = min(mind, distances2.min())
+        maxd = max(maxd, distances2.max())
+
+    distances = torch.cat([distances1, torch.FloatTensor([maxd+1]), distances2]) # X
+    ## spatially close nodes are neighborhood
+    dis_sort = distances.argsort()
+    # dis_sorts.append(dis_sort)
+    nei_nid = dis_sort[:N]
+    ## connected nodes are neighborhood
+    connected_node = edge_index[1, edge_index[0] == ni]
+    nei_conn = (connected_node==nei_nid[..., None])
+    connected_node = connected_node[~(nei_conn.any(0))]
+    connected_node = connected_node[distances[connected_node].argsort()[:N]] # also sort connected nodes
+    nei_nid = torch.cat([nei_nid, connected_node]) # concat in the sorted rank
+    ## view token, max = N, the neighbor num
+    view_id = torch.LongTensor(list(combinations(torch.arange(len(nei_nid)), dim-1))).T # dim-1 x M
+    # ## view nodes are sorted by distance
+    view_node = [nei_nid[view_id[di]] for di in range(dim-1)] # dim-1 x M, each is a node id
+    ## geom token, max = 2**3 = 8
+    nei_pair = torch.LongTensor(list(combinations(torch.arange(dim-1), 2))) # dim-1 * (dim-2) / 2 x 2, if neighbors connected
+    geom_token = torch.stack([torch.zeros_like(view_node[0]) for _ in range(dim-1+len(nei_pair))]) # dim x M
+    where_edges = torch.cat([nei_conn.any(1), torch.ones_like(connected_node, dtype=bool)])
+    # view_id[0] < view_id[1] 
+    for di in range(dim-1):
+        where_edge = where_edges[view_id[di]]
+        geom_token[di, where_edge] = 1
+    ## if view points are connected
+    for di in range(len(nei_pair)):
+        where_edge = []
+        views = torch.stack([view_node[nei_pair[di, 0]], view_node[nei_pair[di, 1]]], -1) # pair of views
+        for view in views: # for 2 in M x 2
+            where_edge.append((view == edge_index.T).any())
+        where_edge = torch.where(torch.stack(where_edge))[0]
+        geom_token[dim-1+di, where_edge] = 1
+    ## convert token to 10-base number
+    geom_token = bin2dec(geom_token) # M
+    token_count = torch.FloatTensor([len(view_node[0])])
+    ## embed of geom direction from view points to cur node
+    view_dir = torch.stack([node_feat[view_node[di]] - node_feat[ni] for di in range(dim-1)]).sum(0) # M x C
+    node_embed = torch.stack([node_feat[ni] for _ in range(len(view_node[0]))]) # M x C
+
+    return geom_token, view_dir, node_embed, token_count, dis_sort
+
 def bin2dec(b):
     bits, batch = b.shape
     mask = 2 ** torch.arange(bits - 1, -1, -1).to(b.device, b.dtype)
     mask = torch.stack([mask for _ in range(batch)], 1)
     return torch.sum(mask * b, 0)
 
-def token_zeropad(tokens, token_count, seq_len, datay, *args):
+def token_zeropad(tokens: torch.Tensor, token_count: torch.Tensor, seq_len: int, datay: torch.Tensor, *args):
     '''
     tokens: M
     M = token number
@@ -117,7 +165,7 @@ def token_zeropad(tokens, token_count, seq_len, datay, *args):
         masks.append(mask)
     batches = torch.stack(batches)
     masks = torch.stack(masks)
-    labels = torch.LongTensor(labels)
+    labels = torch.stack(labels)
     return batches, masks, labels
 
 def token_neighborpad(tokens, token_count, seq_len, datay, dis_sorts):
@@ -184,7 +232,7 @@ class ToyModel(torch.nn.Module):
         self.classifier = torch.nn.Linear(hdim, cls_num)
 
     def forward(self, inputs, masks=None):
-        ## x, pos_tokens, geom_tokens, view_tokens = inputs
+        # x, pos_tokens, geom_tokens, view_tokens = inputs
         ## geom_token + view_token
         embeds = []
         for f, token in zip(self.token_embeds, inputs[1:]):
@@ -254,10 +302,12 @@ if __name__=='__main__':
     use_mask = True
     for i in range(10):
         data = get_data_pyg('wisconsin', split=i)
-        geom_tokens, view_dirs, node_embeds, token_count, distance_sorts = geom_tokenizer(data.x, data.edge_index, 10, dim=3)
-        # geom_tokens_d4, view_dirs, node_embeds, token_count, distance_sorts = geom_tokenizer(data.x, data.edge_index, 10, dim=4)
+        geom_tokens, view_dirs, node_embeds, token_count, distance_sorts = geom_tokenizer(data.x, data.edge_index, 5, dim=3)
+        # geom_tokens_d4, view_dirs_d4, _, token_d4_count, _ = geom_tokenizer(data.x, data.edge_index, 10, dim=4)
         geom_batches, masks, labels = token_padder(geom_tokens, token_count, seq_len, data.y, distance_sorts)
+        # geom_batches_d4, masks_d4, _ = token_padder(geom_tokens_d4, token_d4_count, seq_len, data.y, distance_sorts)
         view_batches, _, _ = token_padder(view_dirs, token_count, seq_len, data.y, distance_sorts)
+        # view_batches_d4, _, _ = token_padder(view_dirs_d4, token_d4_count, seq_len, data.y, distance_sorts)
         x_batches, _, _ = token_padder(node_embeds, token_count, seq_len, data.y, distance_sorts)
         train_idx = torch.where(data.train_mask)[0]
         val_idx = torch.where(data.val_mask)[0]
