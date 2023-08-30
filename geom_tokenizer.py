@@ -20,10 +20,16 @@ def geom_tokenizer(node_feat: torch.Tensor, edge_index: torch.Tensor, N: int, di
         if len(distances1) > 0:
             mind = distances1.min()
             maxd = distances1.max()
+        else:
+            mind = 1e10
+            maxd = 0
         distances2 = ((node_feat[ni] - node_feat[:ni]) **2 ).sum(1)
         if len(distances2) > 0:
             mind = min(mind, distances2.min())
             maxd = max(maxd, distances2.max())
+        elif len(distances1) == 0:
+            print(f'Data error, data shape {node_feat.shape}, this is the {ni}-th node')
+            exit()
 
         distances = torch.cat([distances1, torch.FloatTensor([maxd+1]), distances2]) # X
         ## spatially close nodes are neighborhood
@@ -85,10 +91,17 @@ def geom_tokenizer_onenode(ni: int, node_feat: torch.Tensor, edge_index: torch.T
     if len(distances1) > 0:
         mind = distances1.min()
         maxd = distances1.max()
+    else:
+        mind = 1e10
+        maxd = 0
     distances2 = ((node_feat[ni] - node_feat[:ni]) **2 ).sum(1)
     if len(distances2) > 0:
         mind = min(mind, distances2.min())
         maxd = max(maxd, distances2.max())
+    elif len(distances1) == 0:
+        print(f'Data error, data shape {node_feat.shape}, this is the {ni}-th node')
+        exit()
+
 
     distances = torch.cat([distances1, torch.FloatTensor([maxd+1]), distances2]) # X
     ## spatially close nodes are neighborhood
