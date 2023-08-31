@@ -6,18 +6,20 @@ from torch.utils.data import DataLoader
 
 from datasets import DataBatchSet
 from data_handling import get_data_pyg
-from geom_tokenizer import ToyModel, ToyModelPE
+# from geom_tokenizer import ToyModel, ToyModelPE
+from models import BERT
 
 def main():
     torch.manual_seed(142857)
     device = 'cuda:3'
     seq_len = 512
-    batch_size = 24
+    batch_size = 16
     epoch = 100
     lr = 1e-5
     num_worker = 8
     topN = 10
     use_mask = True
+    geom_dim = 3
     for i in range(10):
         data = get_data_pyg('cora', split=i)
         train_set = DataBatchSet(data.x, data.edge_index, data.y, mask=data.train_mask, seq_len=seq_len, N=topN)
@@ -27,7 +29,7 @@ def main():
         test_set = DataBatchSet(data.x, data.edge_index, data.y, mask=data.test_mask, seq_len=seq_len, N=topN)
         testloader = DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=num_worker)
         loss_fn = torch.nn.CrossEntropyLoss()
-        model = ToyModelPE(0, data.x.shape[1], 3, data.y.max().item()+1).to(device)
+        model = BERT(0, data.x.shape[1], geom_dim, data.y.max().item()+1, pe_dim=train_set.pe_dim).to(device)
         optimizer = optim.Adam(model.parameters(),lr=lr) # 1e-4,weight_decay=0.01
         print(f'[start train val on split {i}]')
         for e in range(epoch):

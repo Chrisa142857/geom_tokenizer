@@ -2,7 +2,8 @@ from geom_tokenizer import geom_tokenizer_onenode, token_zeropad
 import torch
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
-
+import math
+from positional_encoder import PositionalEncodingTransform
 
 def main():
     from data_handling import get_data_pyg
@@ -46,17 +47,22 @@ def binary(x, bits):
 
 class DataBatchSet(Dataset):
 
-    def __init__(self, node_feat, edge_index, label, node_idx=None, mask=None, node_feat2bin=False, N=10, geom_dim=3, seq_len=512) -> None:
+    def __init__(self, node_feat, edge_index, label, node_idx=None, mask=None, node_feat2bin=False, N=10, geom_dim=3, seq_len=512, lap_pe_dim=8) -> None:
+        self.pe_trans = PositionalEncodingTransform(lap_dim=lap_pe_dim)
+        self.pe_dim = lap_pe_dim
         self.node_feat = node_feat
         self.edge_index = edge_index
         self.label = label
         self.N = N
         self.dim = geom_dim
         self.seq_len = seq_len
-        self.node_feat2bin = node_feat2bin
+        # self.node_feat2bin = node_feat2bin
         self.token_padder = token_zeropad
         if node_feat2bin:
-            self.node_feat_ch = len(bin(max([f.max() for f in node_feat]))) - 2
+            self.node_feat_ch = int(math.log(node_embeds.max(),2))+1
+        else:
+            self.node_feat_ch = node_feat[0].shape[-1]
+        print("Data node feat channel", self.node_feat_ch)
         assert len(node_feat) == len(label)
         if isinstance(node_feat, list):
             ## if task is graph level, sequence will include all nodes of a graph
@@ -75,14 +81,16 @@ class DataBatchSet(Dataset):
                 self.node_idx = torch.where(mask)[0]
             else:
                 self.node_idx = torch.arange(len(node_feat))
-        self.geom_tokens, self.view_dirs, self.node_embeds, self.token_count, self.distance_sorts = [], [], [], [], []
+        # self.geom_tokens, self.view_dirs, self.node_embeds, self.token_count, self.distance_sorts = [], [], [], [], []
         if self.graph_level:
             graph_geom_tokens = [[] for gi in range(len(node_feat))]
             graph_view_dirs = [[] for gi in range(len(node_feat))]
             graph_node_embeds = [[] for gi in range(len(node_feat))]
             graph_token_count = [[] for gi in range(len(node_feat))]
+            graph_pe = [[] for gi in range(len(node_feat))]
             for gi, ni in tqdm(self.node_idx, desc='Init tokens'):
                 geom_tokens, view_dirs, node_embeds, token_count, distance_sorts = geom_tokenizer_onenode(ni, node_feat[gi], edge_index[gi], N, geom_dim)
+                graph_pe.append(self.pe_trans(edge_index[gi], len(node_feat[gi])))
                 graph_geom_tokens[gi].append(geom_tokens)
                 graph_view_dirs[gi].append(view_dirs)
                 graph_node_embeds[gi].append(node_embeds)
@@ -93,19 +101,24 @@ class DataBatchSet(Dataset):
                 view_dirs = torch.cat(graph_view_dirs[gi])
                 node_embeds = torch.cat(graph_node_embeds[gi])
                 token_count = torch.cat(graph_token_count[gi])
-                datay = self.label[gi]
-                self.caches.append(self.pad_tokens(geom_tokens, view_dirs, node_embeds, token_count, distance_sorts, datay))
+                if node_feat2bin:
+                    node_embeds = binary(node_embeds, int(math.log(node_embeds.max(),2))+1)
+                datay = torch.cat([self.label[gi] for _ in range(len(token_count))]) 
+                self.caches.append(self.pad_tokens(geom_tokens, view_dirs, node_embeds, token_count, None, datay))
         else:
             self.caches = []
+            pe = self.pe_trans(edge_index, len(node_feat))
             for ni in tqdm(self.node_idx, desc='Init tokens'):
                 geom_tokens, view_dirs, node_embeds, token_count, distance_sorts = geom_tokenizer_onenode(ni, node_feat, edge_index, N, geom_dim)
+                node_embeds = torch.cat([node_embeds, torch.stack([pe[ni] for _ in range(len(node_embeds))], 0)], -1)
                 # self.geom_tokens.append(geom_tokens)
                 # self.view_dirs.append(view_dirs)
                 # self.node_embeds.append(node_embeds)
                 # self.token_count.append(token_count)
                 # self.distance_sorts.append(distance_sorts)
                 datay = self.label[ni:ni+1]
-                self.caches.append(self.pad_tokens(geom_tokens, view_dirs, node_embeds, token_count, distance_sorts, datay))
+                outs = self.pad_tokens(geom_tokens, view_dirs, node_embeds, token_count, distance_sorts, datay)
+                self.caches.append([o[0] for o in outs])
             
 
     def pad_tokens(self, geom_tokens, view_dirs, node_embeds, token_count, distance_sorts, datay):
@@ -114,7 +127,7 @@ class DataBatchSet(Dataset):
         view_dirs, _, _ = self.token_padder(view_dirs, token_count, self.seq_len, datay, distance_sorts)
         # view_batches_d4, _, _ = self.token_padder(view_dirs_d4, token_d4_count, seq_len, data.y, distance_sorts)
         node_embeds, _, _ = self.token_padder(node_embeds, token_count, self.seq_len, datay, distance_sorts)
-        return node_embeds[0], geom_tokens[0], view_dirs[0], masks[0], labels[0]
+        return node_embeds, geom_tokens, view_dirs, masks, labels
 
     def __getitem__(self, i):
         # if self.graph_level:

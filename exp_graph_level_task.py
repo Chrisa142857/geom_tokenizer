@@ -11,7 +11,7 @@ from geom_tokenizer import ToyModel
 def main():
     torch.manual_seed(142857)
     device = 'cuda:0'
-    seq_len = 512
+    seq_len = 2048
     batch_size = 16
     epoch = 100
     lr = 1e-6

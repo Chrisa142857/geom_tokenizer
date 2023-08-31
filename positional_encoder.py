@@ -63,14 +63,14 @@ class PositionalEncodingTransform(object):
         self.rw_dim = rw_dim
         self.lap_dim = lap_dim
 
-    def __call__(self, data):
+    def __call__(self, edge_index, num_nodes):
         if self.rw_dim > 0:
-            data.rw_pos_enc = RWSE(
-                data.edge_index, self.rw_dim, data.num_nodes)
+            return RWSE(
+                edge_index, self.rw_dim, num_nodes)
         if self.lap_dim > 0:
-            data.lap_pos_enc = LapPE(
-                data.edge_index, self.lap_dim, data.num_nodes)
-        return data
+            return LapPE(
+                edge_index, self.lap_dim, num_nodes)
+        
     
 class CosinePositionalEncoding(torch.nn.Module):
     '''

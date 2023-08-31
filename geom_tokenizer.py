@@ -223,7 +223,7 @@ def token_neighborpad(tokens, token_count, seq_len, datay, dis_sorts):
     return batches, masks, labels
 
 class ToyModel(torch.nn.Module):
-    def __init__(self, node_num, node_channel, geom_dim, cls_num, nhead=8) -> None:
+    def __init__(self, node_num, node_channel, geom_dim, cls_num, nhead=8, pe_dim=0) -> None:
         '''
         Toy transformer for node classification
         '''
@@ -240,7 +240,7 @@ class ToyModel(torch.nn.Module):
         # token_embed3 = torch.nn.Embedding(node_num**2, hdim//tokens_num)
         # token_embed4 = torch.nn.Embedding(node_num, hdim//4)
         self.token_embeds = torch.nn.ModuleList([token_embed2, token_embed3]) #, token_embed4
-        self.node_embed =  torch.nn.Linear(node_channel, hdim) #, token_embed4
+        self.node_embed =  torch.nn.Linear(node_channel+pe_dim, hdim) #, token_embed4
         ## Transformer Encoder
         # encoder_layer = torch.nn.TransformerEncoderLayer(d_model=hdim, nhead=nhead)
         # self.encoder = torch.nn.TransformerEncoder(encoder_layer, num_layers=6)
@@ -285,7 +285,7 @@ class ToyModelPE(torch.nn.Module):
         # encoder_layer = torch.nn.TransformerEncoderLayer(d_model=hdim, nhead=nhead)
         # self.encoder = torch.nn.TransformerEncoder(encoder_layer, num_layers=6)
         self.classifier = torch.nn.Linear(hdim, cls_num)
-        self.pe = CosinePositionalEncoding(hdim, max_len=2000)
+        self.pe = CosinePositionalEncoding(hdim)
 
     def forward(self, inputs, masks=None):
         # x, pos_tokens, geom_tokens, view_tokens = inputs
