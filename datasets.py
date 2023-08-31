@@ -1,36 +1,38 @@
 from geom_tokenizer import geom_tokenizer_onenode, token_zeropad
 import torch
 from torch.utils.data import Dataset, DataLoader
+from tqdm import tqdm
 
 
 def main():
     from data_handling import get_data_pyg
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataname", type=str, default='pubmed')
+    parser.add_argument("--dataname", type=str, default='zinc')
     parser.add_argument("--device", type=str, default='cuda:0')
     args = parser.parse_args()
     batch_size = 4
+    num_worker = 4
     if args.dataname in ['zinc']: # graph level task
         datasets = get_data_pyg(args.dataname, split=0)
         train_set, val_set, test_set = datasets
         train_set = DataBatchSet([d.x for d in train_set], [d.edge_index for d in train_set], [d.y for d in train_set], node_feat2bin=True)
-        trainloader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
+        trainloader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=num_worker)
         val_set = DataBatchSet([d.x for d in val_set], [d.edge_index for d in val_set], [d.y for d in val_set], node_feat2bin=True)
-        valloader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
+        valloader = DataLoader(val_set, batch_size=batch_size, shuffle=False, num_workers=num_worker)
         test_set = DataBatchSet([d.x for d in test_set], [d.edge_index for d in test_set], [d.y for d in test_set], node_feat2bin=True)
-        testloader = DataLoader(test_set, batch_size=batch_size, shuffle=False)
+        testloader = DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=num_worker)
         loop_data(trainloader)
         
     elif args.dataname in ['pubmed', 'cora', 'citeseer']: # node level task
         for i in range(10):    
             data = get_data_pyg(args.dataname, split=i)
             train_set = DataBatchSet(data.x, data.edge_index, data.y, mask=data.train_mask)
-            trainloader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
+            trainloader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=num_worker)
             val_set = DataBatchSet(data.x, data.edge_index, data.y, mask=data.val_mask)
-            valloader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
+            valloader = DataLoader(val_set, batch_size=batch_size, shuffle=False, num_workers=num_worker)
             test_set = DataBatchSet(data.x, data.edge_index, data.y, mask=data.test_mask)
-            testloader = DataLoader(test_set, batch_size=batch_size, shuffle=False)
+            testloader = DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=num_worker)
             loop_data(trainloader)
 
 def loop_data(loader):
@@ -48,8 +50,15 @@ class DataBatchSet(Dataset):
         self.node_feat = node_feat
         self.edge_index = edge_index
         self.label = label
+        self.N = N
+        self.dim = geom_dim
+        self.seq_len = seq_len
+        self.node_feat2bin = node_feat2bin
+        self.token_padder = token_zeropad
+        if node_feat2bin:
+            self.node_feat_ch = len(bin(max([f.max() for f in node_feat]))) - 2
         assert len(node_feat) == len(label)
-        if isinstance(node_feat, list): 
+        if isinstance(node_feat, list):
             ## if task is graph level, sequence will include all nodes of a graph
             self.graph_level = True
             self.node_idx = []
@@ -66,34 +75,62 @@ class DataBatchSet(Dataset):
                 self.node_idx = torch.where(mask)[0]
             else:
                 self.node_idx = torch.arange(len(node_feat))
-        self.N = N
-        self.dim = geom_dim
-        self.seq_len = seq_len
-        self.node_feat2bin = node_feat2bin
-        if node_feat2bin:
-            self.node_feat_ch = len(bin(max([f.max() for f in node_feat]))) - 2
+        self.geom_tokens, self.view_dirs, self.node_embeds, self.token_count, self.distance_sorts = [], [], [], [], []
+        if self.graph_level:
+            graph_geom_tokens = [[] for gi in range(len(node_feat))]
+            graph_view_dirs = [[] for gi in range(len(node_feat))]
+            graph_node_embeds = [[] for gi in range(len(node_feat))]
+            graph_token_count = [[] for gi in range(len(node_feat))]
+            for gi, ni in tqdm(self.node_idx, desc='Init tokens'):
+                geom_tokens, view_dirs, node_embeds, token_count, distance_sorts = geom_tokenizer_onenode(ni, node_feat[gi], edge_index[gi], N, geom_dim)
+                graph_geom_tokens[gi].append(geom_tokens)
+                graph_view_dirs[gi].append(view_dirs)
+                graph_node_embeds[gi].append(node_embeds)
+                graph_token_count[gi].append(token_count)
+                # graph_distance_sorts.append(distance_sorts)
+            for gi in range(len(node_feat)):
+                geom_tokens = torch.cat(graph_geom_tokens[gi])
+                view_dirs = torch.cat(graph_view_dirs[gi])
+                node_embeds = torch.cat(graph_node_embeds[gi])
+                token_count = torch.cat(graph_token_count[gi])
+                datay = self.label[gi]
+                self.caches.append(self.pad_tokens(geom_tokens, view_dirs, node_embeds, token_count, distance_sorts, datay))
+        else:
+            self.caches = []
+            for ni in tqdm(self.node_idx, desc='Init tokens'):
+                geom_tokens, view_dirs, node_embeds, token_count, distance_sorts = geom_tokenizer_onenode(ni, node_feat, edge_index, N, geom_dim)
+                # self.geom_tokens.append(geom_tokens)
+                # self.view_dirs.append(view_dirs)
+                # self.node_embeds.append(node_embeds)
+                # self.token_count.append(token_count)
+                # self.distance_sorts.append(distance_sorts)
+                datay = self.label[ni:ni+1]
+                self.caches.append(self.pad_tokens(geom_tokens, view_dirs, node_embeds, token_count, distance_sorts, datay))
+            
+
+    def pad_tokens(self, geom_tokens, view_dirs, node_embeds, token_count, distance_sorts, datay):
+        geom_tokens, masks, labels = self.token_padder(geom_tokens, token_count, self.seq_len, datay, distance_sorts)
+        # geom_batches_d4, masks_d4, _ = self.token_padder(geom_tokens_d4, token_d4_count, seq_len, data.y, distance_sorts)
+        view_dirs, _, _ = self.token_padder(view_dirs, token_count, self.seq_len, datay, distance_sorts)
+        # view_batches_d4, _, _ = self.token_padder(view_dirs_d4, token_d4_count, seq_len, data.y, distance_sorts)
+        node_embeds, _, _ = self.token_padder(node_embeds, token_count, self.seq_len, datay, distance_sorts)
+        return node_embeds[0], geom_tokens[0], view_dirs[0], masks[0], labels[0]
 
     def __getitem__(self, i):
-        if self.graph_level:
-            gi, ni = self.node_idx[i]
-            node_feat = self.node_feat[gi]
-            if self.node_feat2bin:
-                node_feat = binary(node_feat, self.node_feat_ch)
-            edge_index = self.edge_index[gi]
-            datay = self.label[gi]
-        else:
-            ni = self.node_idx[i]
-            node_feat = self.node_feat
-            edge_index = self.edge_index
-            datay = self.label[ni:ni+1]
-
-        geom_tokens, view_dirs, node_embeds, token_count, distance_sorts = geom_tokenizer_onenode(ni, node_feat, edge_index, self.N, self.dim)
-        geom_tokens, masks, labels = token_zeropad(geom_tokens, token_count, self.seq_len, datay, distance_sorts)
-        # geom_batches_d4, masks_d4, _ = token_padder(geom_tokens_d4, token_d4_count, seq_len, data.y, distance_sorts)
-        view_dirs, _, _ = token_zeropad(view_dirs, token_count, self.seq_len, datay, distance_sorts)
-        # view_batches_d4, _, _ = token_padder(view_dirs_d4, token_d4_count, seq_len, data.y, distance_sorts)
-        node_embeds, _, _ = token_zeropad(node_embeds, token_count, self.seq_len, datay, distance_sorts)
-        return node_embeds[0], geom_tokens[0], view_dirs[0], masks[0], labels[0], gi if self.graph_level else ni
+        # if self.graph_level:
+        #     gi, ni = self.node_idx[i]
+        #     datay = self.label[gi]
+        # else:
+        #     ni = self.node_idx[i]
+        #     datay = self.label[ni:ni+1]
+        # geom_tokens = self.geom_tokens[i]
+        # view_dirs = self.view_dirs[i]
+        # node_embeds = self.node_embeds[i]
+        # token_count = self.token_count[i]
+        # distance_sorts = self.distance_sorts[i]
+        # node_embeds, geom_tokens, view_dirs, masks, labels = self.pad_tokens(geom_tokens, view_dirs, node_embeds, token_count, distance_sorts, datay)
+        node_embeds, geom_tokens, view_dirs, masks, labels = self.caches[i]
+        return node_embeds, geom_tokens, view_dirs, masks, labels, 0 #gi if self.graph_level else ni
   
     def __len__(self):
         return len(self.node_idx)

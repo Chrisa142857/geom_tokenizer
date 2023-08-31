@@ -7,6 +7,8 @@ import random
 from datetime import datetime
 from itertools import combinations
 
+from positional_encoder import CosinePositionalEncoding
+
 
 def geom_tokenizer(node_feat: torch.Tensor, edge_index: torch.Tensor, N: int, dim: int=3):
     nids = torch.arange(len(node_feat))
@@ -112,7 +114,7 @@ def geom_tokenizer_onenode(ni: int, node_feat: torch.Tensor, edge_index: torch.T
     connected_node = edge_index[1, edge_index[0] == ni]
     nei_conn = (connected_node==nei_nid[..., None])
     connected_node = connected_node[~(nei_conn.any(0))]
-    connected_node = connected_node[distances[connected_node].argsort()[:N]] # also sort connected nodes
+    connected_node = connected_node[distances[connected_node].argsort()[:N]] # also sort connected nodes[:N]
     nei_nid = torch.cat([nei_nid, connected_node]) # concat in the sorted rank
     ## view token, max = N, the neighbor num
     view_id = torch.LongTensor(list(combinations(torch.arange(len(nei_nid)), dim-1))).T # dim-1 x M
@@ -253,6 +255,49 @@ class ToyModel(torch.nn.Module):
         embeds = torch.stack(embeds, 0).sum(0)
         ## geom_token + view_token + node feat
         embeds = embeds + self.node_embed(inputs[0])
+        ## node feat
+        # embeds = self.node_embed(inputs[0])
+        outputs = self.encoder(inputs_embeds=embeds, attention_mask=masks)
+        ## last_hidden_state, pooler_output, attentions = outputs
+        out = self.classifier(outputs[1])
+        return out
+
+class ToyModelPE(torch.nn.Module):
+    def __init__(self, node_num, node_channel, geom_dim, cls_num, nhead=8) -> None:
+        '''
+        Toy transformer for node classification
+        '''
+        super().__init__()
+        ## Embed all tokens
+        # self.encoder = transformers.BertModel.from_pretrained('bert-base-uncased')
+        self.encoder = transformers.BertModel(transformers.BertConfig())
+        # self.encoder.config.output_attentions = True
+        hdim = self.encoder.config.hidden_size
+        tokens_num = 1
+        # token_embed1 = torch.nn.Embedding(node_num, hdim//tokens_num)
+        token_embed2 = torch.nn.Embedding(2**geom_dim, hdim//tokens_num)
+        token_embed3 = torch.nn.Linear(node_channel, hdim//tokens_num)
+        # token_embed3 = torch.nn.Embedding(node_num**2, hdim//tokens_num)
+        # token_embed4 = torch.nn.Embedding(node_num, hdim//4)
+        self.token_embeds = torch.nn.ModuleList([token_embed2, token_embed3]) #, token_embed4
+        self.node_embed =  torch.nn.Linear(node_channel, hdim) #, token_embed4
+        ## Transformer Encoder
+        # encoder_layer = torch.nn.TransformerEncoderLayer(d_model=hdim, nhead=nhead)
+        # self.encoder = torch.nn.TransformerEncoder(encoder_layer, num_layers=6)
+        self.classifier = torch.nn.Linear(hdim, cls_num)
+        self.pe = CosinePositionalEncoding(hdim, max_len=2000)
+
+    def forward(self, inputs, masks=None):
+        # x, pos_tokens, geom_tokens, view_tokens = inputs
+        ## geom_token + view_token
+        embeds = []
+        for f, token in zip(self.token_embeds, inputs[1:]):
+           embeds.append(f(token))
+        embeds = torch.stack(embeds, 0).sum(0)
+        ## geom_token + view_token + node feat
+        embeds = embeds + self.node_embed(inputs[0])
+        ## pe
+        embeds = self.pe(embeds)
         ## node feat
         # embeds = self.node_embed(inputs[0])
         outputs = self.encoder(inputs_embeds=embeds, attention_mask=masks)
