@@ -4,7 +4,7 @@ import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from datasets import DataBatchSet
+from datasets import DataBatchSetNodeLevel
 from data_handling import get_data_pyg
 # from geom_tokenizer import ToyModel, ToyModelPE
 from models import BERT
@@ -22,11 +22,11 @@ def main():
     geom_dim = 3
     for i in range(10):
         data = get_data_pyg('cora', split=i)
-        train_set = DataBatchSet(data.x, data.edge_index, data.y, mask=data.train_mask, seq_len=seq_len, N=topN)
+        train_set = DataBatchSetNodeLevel(data.x, data.edge_index, data.y, mask=data.train_mask, seq_len=seq_len, N=topN)
         trainloader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=num_worker)
-        val_set = DataBatchSet(data.x, data.edge_index, data.y, mask=data.val_mask, seq_len=seq_len, N=topN)
+        val_set = DataBatchSetNodeLevel(data.x, data.edge_index, data.y, mask=data.val_mask, seq_len=seq_len, N=topN)
         valloader = DataLoader(val_set, batch_size=batch_size, shuffle=False, num_workers=num_worker)
-        test_set = DataBatchSet(data.x, data.edge_index, data.y, mask=data.test_mask, seq_len=seq_len, N=topN)
+        test_set = DataBatchSetNodeLevel(data.x, data.edge_index, data.y, mask=data.test_mask, seq_len=seq_len, N=topN)
         testloader = DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=num_worker)
         loss_fn = torch.nn.CrossEntropyLoss()
         model = BERT(0, data.x.shape[1], geom_dim, data.y.max().item()+1, pe_dim=train_set.pe_dim).to(device)

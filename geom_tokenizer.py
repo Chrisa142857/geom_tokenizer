@@ -223,14 +223,14 @@ def token_neighborpad(tokens, token_count, seq_len, datay, dis_sorts):
     return batches, masks, labels
 
 class ToyModel(torch.nn.Module):
-    def __init__(self, node_num, node_channel, geom_dim, cls_num, nhead=8, pe_dim=0) -> None:
+    def __init__(self, node_num, node_channel, geom_dim, cls_num, nhead=8, pe_dim=0, max_position_embeddings=512) -> None:
         '''
         Toy transformer for node classification
         '''
         super().__init__()
         ## Embed all tokens
         # self.encoder = transformers.BertModel.from_pretrained('bert-base-uncased')
-        self.encoder = transformers.BertModel(transformers.BertConfig())
+        self.encoder = transformers.BertModel(transformers.BertConfig(max_position_embeddings=max_position_embeddings))
         # self.encoder.config.output_attentions = True
         hdim = self.encoder.config.hidden_size
         tokens_num = 1
