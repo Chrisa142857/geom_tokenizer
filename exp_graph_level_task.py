@@ -10,9 +10,9 @@ from geom_tokenizer import ToyModel
 
 def main():
     torch.manual_seed(142857)
-    device = 'cuda:0'
+    device = 'cuda:3'
     seq_len = 2048
-    batch_size = 16
+    batch_size = 8
     epoch = 100
     lr = 1e-6
     num_worker = 8

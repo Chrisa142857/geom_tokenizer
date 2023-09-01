@@ -47,7 +47,7 @@ def binary(x, bits):
 
 class DataBatchSet(Dataset):
 
-    def __init__(self, node_feat, edge_index, label, node_idx=None, mask=None, node_feat2bin=False, N=10, geom_dim=3, seq_len=512, lap_pe_dim=8) -> None:
+    def __init__(self, node_feat, edge_index, label, node_idx=None, mask=None, node_feat2bin=False, N=10, geom_dim=3, seq_len=512, lap_pe_dim=0) -> None:
         self.pe_trans = PositionalEncodingTransform(lap_dim=lap_pe_dim)
         self.pe_dim = lap_pe_dim
         self.node_feat = node_feat
@@ -59,7 +59,7 @@ class DataBatchSet(Dataset):
         # self.node_feat2bin = node_feat2bin
         self.token_padder = token_zeropad
         if node_feat2bin:
-            self.node_feat_ch = int(math.log(node_embeds.max(),2))+1
+            self.node_feat_ch = int(math.log(max([f.max() for f in node_feat]),2))+1
         else:
             self.node_feat_ch = node_feat[0].shape[-1]
         print("Data node feat channel", self.node_feat_ch)
@@ -90,7 +90,7 @@ class DataBatchSet(Dataset):
             graph_pe = [[] for gi in range(len(node_feat))]
             for gi, ni in tqdm(self.node_idx, desc='Init tokens'):
                 geom_tokens, view_dirs, node_embeds, token_count, distance_sorts = geom_tokenizer_onenode(ni, node_feat[gi], edge_index[gi], N, geom_dim)
-                graph_pe.append(self.pe_trans(edge_index[gi], len(node_feat[gi])))
+                if self.pe_dim > 0: graph_pe.append(self.pe_trans(edge_index[gi], len(node_feat[gi])))
                 graph_geom_tokens[gi].append(geom_tokens)
                 graph_view_dirs[gi].append(view_dirs)
                 graph_node_embeds[gi].append(node_embeds)
@@ -107,10 +107,10 @@ class DataBatchSet(Dataset):
                 self.caches.append(self.pad_tokens(geom_tokens, view_dirs, node_embeds, token_count, None, datay))
         else:
             self.caches = []
-            pe = self.pe_trans(edge_index, len(node_feat))
+            if self.pe_dim > 0: pe = self.pe_trans(edge_index, len(node_feat))
             for ni in tqdm(self.node_idx, desc='Init tokens'):
                 geom_tokens, view_dirs, node_embeds, token_count, distance_sorts = geom_tokenizer_onenode(ni, node_feat, edge_index, N, geom_dim)
-                node_embeds = torch.cat([node_embeds, torch.stack([pe[ni] for _ in range(len(node_embeds))], 0)], -1)
+                if self.pe_dim > 0: node_embeds = torch.cat([node_embeds, torch.stack([pe[ni] for _ in range(len(node_embeds))], 0)], -1)
                 # self.geom_tokens.append(geom_tokens)
                 # self.view_dirs.append(view_dirs)
                 # self.node_embeds.append(node_embeds)
