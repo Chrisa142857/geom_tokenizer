@@ -10,7 +10,7 @@ class BERT(torch.nn.Module):
         super().__init__()
         ## Embed all tokens
         # self.encoder = transformers.BertModel.from_pretrained('bert-base-uncased')
-        self.encoder = transformers.BertModel(transformers.BertConfig(hidden_size=hdim, num_attention_heads=nhead))
+        self.encoder = transformers.BertModel(transformers.BertConfig(hidden_size=hdim, num_attention_heads=nhead, num_hidden_layers=1))
         # self.encoder.config.output_attentions = True
         hdim = self.encoder.config.hidden_size
         tokens_num = 1

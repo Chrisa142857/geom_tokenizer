@@ -162,7 +162,9 @@ class DataBatchSetNodeLevel(Dataset):
             self.node_idx = torch.arange(len(node_feat))
         self.geom_tokens, self.view_dirs, self.node_embeds, self.token_count, self.distance_sorts = [], [], [], [], []
         self.caches = []
-        if self.pe_dim > 0: pe = self.pe_trans(edge_index, len(node_feat))
+        if self.pe_dim > 0: 
+            pe = torch.load(f'../data/pubmed/lap_pe_dim={self.pe_dim}.pth')
+            # pe = self.pe_trans(edge_index, len(node_feat))
         token_lens = []
         for ni in tqdm(self.node_idx, desc='Init tokens'):
             geom_tokens, view_dirs, node_embeds, token_count, distance_sorts = geom_tokenizer_onenode(ni, node_feat, edge_index, N, geom_dim)

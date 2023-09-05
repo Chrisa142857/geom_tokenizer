@@ -21,9 +21,9 @@ def main():
     topN = 10
     use_mask = True
     geom_dim = 3
-    lap_pe_dim = 8
+    lap_pe_dim = 15
     for i in range(10):
-        data = get_data_pyg('minesweeper', split=i)
+        data = get_data_pyg('pubmed', split=i)
         train_set = DataBatchSetNodeLevel(data.x, data.edge_index, data.y, mask=data.train_mask, seq_len=seq_len, N=topN, lap_pe_dim=lap_pe_dim)
         trainloader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=num_worker)
         val_set = DataBatchSetNodeLevel(data.x, data.edge_index, data.y, mask=data.val_mask, seq_len=seq_len, N=topN, lap_pe_dim=lap_pe_dim)
