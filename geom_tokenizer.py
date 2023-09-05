@@ -151,6 +151,31 @@ def bin2dec(b):
     mask = torch.stack([mask for _ in range(batch)], 1)
     return torch.sum(mask * b, 0)
 
+
+def re_features(adj, features, K):
+    #return (N, K+1, d)
+    nodes_features = torch.empty(features.shape[0], 1, K+1, features.shape[1])
+
+    for i in range(features.shape[0]):
+
+        nodes_features[i, 0, 0, :] = features[i]
+
+    x = features + torch.zeros_like(features)
+
+    for i in range(K):
+
+        x = torch.matmul(adj, x)
+
+        for index in range(features.shape[0]):
+
+            nodes_features[index, 0, i + 1, :] = x[index]        
+
+    nodes_features = nodes_features.squeeze()
+
+
+    return nodes_features
+
+
 def token_zeropad(tokens: torch.Tensor, token_count: torch.Tensor, seq_len: int, datay: torch.Tensor, *args):
     '''
     tokens: M

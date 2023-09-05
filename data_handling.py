@@ -1,21 +1,25 @@
-from torch_geometric.datasets import WebKB, WikipediaNetwork, Actor, ZINC, AQSOL, WikiCS, GNNBenchmarkDataset, Planetoid
+from torch_geometric.datasets import WebKB, WikipediaNetwork, Actor, ZINC, AQSOL, WikiCS, GNNBenchmarkDataset, Planetoid, HeterophilousGraphDataset
 import torch
 import numpy as np
+import torch_geometric.transforms as T
 
 def get_data_pyg(name, split=0):
   path = '../data/' +name
+  transform = T.Compose([T.NormalizeFeatures(), T.ToSparseTensor()])
   if name in ['chameleon','squirrel']:
-    dataset = WikipediaNetwork(root=path, name=name)
+    dataset = WikipediaNetwork(root=path, name=name, transform=transform)
   if name in ['cornell', 'texas', 'wisconsin']:
-    dataset = WebKB(path ,name=name)
+    dataset = WebKB(path ,name=name, transform=transform)
   if name == 'film':
-    dataset = Actor(root=path)
+    dataset = Actor(root=path, transform=transform)
   if name == 'zinc':
-    dataset = [ZINC(root=path, split='train', subset=True), ZINC(root=path, split='val', subset=True), ZINC(root=path, split='test', subset=True)]
+    dataset = [ZINC(root=path, split='train', subset=True, transform=transform), ZINC(root=path, split='val', subset=True, transform=transform), ZINC(root=path, split='test', subset=True, transform=transform)]
   if name in ['pubmed', 'cora', 'citeseer']:
-    dataset = Planetoid(root=path, name=name, split='geom-gcn')
+    dataset = Planetoid(root=path, name=name, split='geom-gcn', transform=transform)
+  if name in ['roman-empire', 'amazon-ratings', 'minesweeper', 'tolokers', 'questions']:
+    dataset = HeterophilousGraphDataset(root=path, name=name, transform=transform)
 
-  if name in ['pubmed', 'cora', 'citeseer']:
+  if name in ['pubmed', 'cora', 'citeseer', 'roman-empire', 'amazon-ratings', 'minesweeper', 'tolokers', 'questions']:
     data = dataset
     data.train_mask = data.train_mask[:, split]
     data.val_mask = data.val_mask[:, split]

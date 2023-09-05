@@ -163,8 +163,10 @@ class DataBatchSetNodeLevel(Dataset):
         self.geom_tokens, self.view_dirs, self.node_embeds, self.token_count, self.distance_sorts = [], [], [], [], []
         self.caches = []
         if self.pe_dim > 0: pe = self.pe_trans(edge_index, len(node_feat))
+        token_lens = []
         for ni in tqdm(self.node_idx, desc='Init tokens'):
             geom_tokens, view_dirs, node_embeds, token_count, distance_sorts = geom_tokenizer_onenode(ni, node_feat, edge_index, N, geom_dim)
+            token_lens.append(token_count.max())
             if self.pe_dim > 0: node_embeds = torch.cat([node_embeds, torch.stack([pe[ni] for _ in range(len(node_embeds))], 0)], -1)
             if not self.do_cache:
                 self.geom_tokens.append(geom_tokens)
@@ -176,7 +178,7 @@ class DataBatchSetNodeLevel(Dataset):
                 datay = self.label[ni:ni+1]
                 outs = pad_tokens(self, geom_tokens, view_dirs, node_embeds, token_count, distance_sorts, datay)
                 self.caches.append([o[0] for o in outs])
-            
+        print(f'Geom num mean of each node: {sum(token_lens)/len(token_lens)}, max: {max(token_lens)}, min: {min(token_lens)}, when dim={geom_dim}')
 
     def __getitem__(self, i):
         if not self.do_cache:
